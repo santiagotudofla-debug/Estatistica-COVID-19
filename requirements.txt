@@ -5,4 +5,4 @@ seaborn
 matplotlib
 requests
 xhtml2pdf
-fpdf
+fpdf2
