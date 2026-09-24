@@ -57,15 +57,27 @@ with st.spinner("Baixando e extraindo base de dados mais recente do Kaggle..."):
 if df is None:
     st.stop()
 
-if "Confirmed" not in df.columns:
-    st.error("O arquivo precisa ter uma coluna chamada 'Confirmed'.")
+# Traduzindo as colunas do dataset
+df = df.rename(columns={
+    "Country": "País",
+    "Date": "Data",
+    "Confirmed": "Confirmados",
+    "Deaths": "Mortes",
+    "Recovered": "Recuperados",
+    "Active": "Ativos",
+    "Tests_Conducted": "Testes Realizados",
+    "Vaccination_Rate_%": "Taxa de Vacinação (%)"
+})
+
+if "Confirmados" not in df.columns:
+    st.error("O arquivo precisa ter uma coluna chamada 'Confirmados'.")
     st.stop()
 
-df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-paises = sorted(df["Country"].dropna().unique())
+df["Data"] = pd.to_datetime(df["Data"], errors="coerce")
+paises = sorted(df["País"].dropna().unique())
 paises_selecionados = st.sidebar.multiselect("País", paises, default=paises)
 
-data_min, data_max = df["Date"].min(), df["Date"].max()
+data_min, data_max = df["Data"].min(), df["Data"].max()
 periodo = st.sidebar.date_input(
     "Período", value=(data_min.date(), data_max.date()),
     min_value=data_min.date(), max_value=data_max.date(),
@@ -73,9 +85,9 @@ periodo = st.sidebar.date_input(
 data_inicio, data_fim = periodo if len(periodo) == 2 else (data_min.date(), data_max.date())
 
 df_filtrado = df[
-    df["Country"].isin(paises_selecionados)
-    & (df["Date"].dt.date >= data_inicio)
-    & (df["Date"].dt.date <= data_fim)
+    df["País"].isin(paises_selecionados)
+    & (df["Data"].dt.date >= data_inicio)
+    & (df["Data"].dt.date <= data_fim)
 ]
 
 if df_filtrado.empty:
@@ -100,9 +112,9 @@ def generate_pdf_report(df_to_export, bootstrap_result=None):
         pdf.cell(0, 8, "1. Visao Geral (Filtros Aplicados)", new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("helvetica", "", 11)
         
-        total_casos = df_to_export['Confirmed'].sum()
-        total_mortes = df_to_export['Deaths'].sum()
-        vac_media = df_to_export['Vaccination_Rate_%'].mean()
+        total_casos = df_to_export['Confirmados'].sum()
+        total_mortes = df_to_export['Mortes'].sum()
+        vac_media = df_to_export['Taxa de Vacinação (%)'].mean()
         
         pdf.cell(0, 6, f"- Total de Registros Analisados: {len(df_to_export)}", new_x="LMARGIN", new_y="NEXT")
         pdf.cell(0, 6, f"- Total de Casos Confirmados: {total_casos:,.0f}", new_x="LMARGIN", new_y="NEXT")
@@ -126,7 +138,7 @@ def generate_pdf_report(df_to_export, bootstrap_result=None):
         pdf.cell(0, 8, "3. Top Paises (Maior n. de Casos Confirmados)", new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("helvetica", "", 10)
         
-        top_paises = df_to_export.groupby("Country")[["Confirmed", "Deaths"]].sum().sort_values(by="Confirmed", ascending=False).head(5)
+        top_paises = df_to_export.groupby("País")[["Confirmados", "Mortes"]].sum().sort_values(by="Confirmados", ascending=False).head(5)
         
         pdf.set_font("helvetica", "B", 10)
         pdf.cell(70, 8, "Pais", border=1)
@@ -136,8 +148,8 @@ def generate_pdf_report(df_to_export, bootstrap_result=None):
         pdf.set_font("helvetica", "", 10)
         for pais, row in top_paises.iterrows():
             pdf.cell(70, 8, str(pais), border=1)
-            pdf.cell(60, 8, f"{row['Confirmed']:,.0f}", border=1, align="R")
-            pdf.cell(60, 8, f"{row['Deaths']:,.0f}", border=1, align="R", new_x="LMARGIN", new_y="NEXT")
+            pdf.cell(60, 8, f"{row['Confirmados']:,.0f}", border=1, align="R")
+            pdf.cell(60, 8, f"{row['Mortes']:,.0f}", border=1, align="R", new_x="LMARGIN", new_y="NEXT")
             
         return bytes(pdf.output())
     except Exception as e:
@@ -174,9 +186,9 @@ with aba_geral:
     
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Registros (após filtro)", f"{len(df_filtrado):,}")
-    k2.metric("Casos Confirmados", f"{df_filtrado['Confirmed'].sum():,.0f}")
-    k3.metric("Mortes", f"{df_filtrado['Deaths'].sum():,.0f}")
-    k4.metric("Vacinação Média", f"{df_filtrado['Vaccination_Rate_%'].mean():.1f}%")
+    k2.metric("Casos Confirmados", f"{df_filtrado['Confirmados'].sum():,.0f}")
+    k3.metric("Mortes", f"{df_filtrado['Mortes'].sum():,.0f}")
+    k4.metric("Vacinação Média", f"{df_filtrado['Taxa de Vacinação (%)'].mean():.1f}%")
     
     st.divider()
     
@@ -184,7 +196,7 @@ with aba_geral:
     st.caption("Resumo matemático das variáveis numéricas contidas no conjunto de dados filtrado.")
     
     # Selecionar variáveis numéricas para descrever
-    cols_numericas = ["Confirmed", "Deaths", "Recovered", "Active", "Tests_Conducted", "Vaccination_Rate_%"]
+    cols_numericas = ["Confirmados", "Mortes", "Recuperados", "Ativos", "Testes Realizados", "Taxa de Vacinação (%)"]
     cols_existentes = [c for c in cols_numericas if c in df_filtrado.columns]
     
     desc_df = df_filtrado[cols_existentes].describe()
@@ -205,12 +217,12 @@ with aba_graficos:
     
     st.subheader("Evolução Temporal dos Casos")
     # Agrupar por data
-    evolucao = df_filtrado.groupby("Date")[["Confirmed", "Deaths", "Recovered"]].sum().reset_index()
+    evolucao = df_filtrado.groupby("Data")[["Confirmados", "Mortes", "Recuperados"]].sum().reset_index()
     
     fig_evolucao, ax_evolucao = plt.subplots(figsize=(10, 5))
-    ax_evolucao.plot(evolucao["Date"], evolucao["Confirmed"], label="Confirmados", color="#3498db")
-    ax_evolucao.plot(evolucao["Date"], evolucao["Recovered"], label="Recuperados", color="#2ecc71")
-    ax_evolucao.plot(evolucao["Date"], evolucao["Deaths"], label="Mortes", color="#e74c3c")
+    ax_evolucao.plot(evolucao["Data"], evolucao["Confirmados"], label="Confirmados", color="#3498db")
+    ax_evolucao.plot(evolucao["Data"], evolucao["Recuperados"], label="Recuperados", color="#2ecc71")
+    ax_evolucao.plot(evolucao["Data"], evolucao["Mortes"], label="Mortes", color="#e74c3c")
     ax_evolucao.set_title("Evolução de Casos ao Longo do Tempo")
     ax_evolucao.set_xlabel("Data")
     ax_evolucao.set_ylabel("Quantidade (Soma)")
@@ -245,9 +257,9 @@ with aba_graficos:
         fig_scatter, ax_scatter = plt.subplots(figsize=(6, 5))
         sns.scatterplot(
             data=df_filtrado, 
-            x="Vaccination_Rate_%", 
-            y="Deaths", 
-            hue="Country", 
+            x="Taxa de Vacinação (%)", 
+            y="Mortes", 
+            hue="País", 
             alpha=0.7, 
             ax=ax_scatter
         )
@@ -287,7 +299,7 @@ with aba_bootstrap:
     if st.button("▶️ Executar Bootstrap para Casos Confirmados", type="primary"):
         with st.spinner("Realizando reamostragem computacional..."):
             rng = np.random.default_rng(int(semente))
-            casos_confirmados = df_filtrado["Confirmed"].values
+            casos_confirmados = df_filtrado["Confirmados"].values
             n = len(casos_confirmados)
 
             # Reamostragem vetorizada
