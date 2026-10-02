@@ -656,4 +656,4 @@ with aba_svm:
                         mime="image/png",
                     )
     except ImportError:
-        st.error("A biblioteca 'scikit-learn' não está instalada. Adicione 'scikit-learn' ao seu ambiente/requirements.txt e reinicie o app.")
+        st.error("A biblioteca 'scikit-learn' não está instalada. Adicione 'scikit-learn' ao seu ambiente/requirements.txt e reinicie o app.")
