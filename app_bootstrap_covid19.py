@@ -1,22 +1,161 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import os
+import plotly.express as px
 import seaborn as sns
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from utils_pdf import generate_pdf_report
+from utils_estatistica import executar_bootstrap_confirmados
+
+# Estilo global e paleta de cores para os gráficos mais profissionais
+sns.set_theme(style="whitegrid", palette="muted")
+plt.rcParams.update({
+    "figure.facecolor": "#ffffff",
+    "axes.facecolor": "#ffffff",
+    "axes.edgecolor": "#e1e4e8",
+    "axes.titleweight": "bold",
+    "axes.titlesize": 14,
+    "axes.labelsize": 11,
+    "grid.color": "#f0f2f6",
+    "grid.linestyle": "--",
+    "legend.frameon": True,
+    "legend.facecolor": "#ffffff",
+    "legend.edgecolor": "#e1e4e8"
+})
 from io import BytesIO
 import requests
 import zipfile
 
 st.set_page_config(page_title="Dashboard Acadêmico - COVID-19", page_icon="🧪", layout="wide")
 
+# CSS customizado para tornar a interface mais limpa, moderna e profissional
+st.markdown("""
+<style>
+    @keyframes virusDrift {
+        0% { transform: scale(1) translate(0px, 0px); }
+        50% { transform: scale(1.1) translate(-10px, -10px); }
+        100% { transform: scale(1) translate(0px, 0px); }
+    }
+
+    /* Elemento HTML de imagem de fundo animada (Efeito Marca D'Água) */
+    #custom-bg-image {
+        position: fixed;
+        top: 0; left: 0; 
+        width: 100vw; height: 100vh;
+        background-image: url("https://images.unsplash.com/photo-1584036561566-baf8f5f1b144?auto=format&fit=crop&w=1920&q=80");
+        background-size: cover;
+        background-position: center;
+        z-index: 0;
+        opacity: 0.12; /* Nível perfeito para marca d'água (não atrapalha a leitura) */
+        pointer-events: none;
+        animation: virusDrift 20s ease-in-out infinite;
+    }
+
+    /* Ocultar fundo apenas do Header para manter o layout limpo */
+    [data-testid="stHeader"] {
+        background: transparent !important;
+    }
+
+    /* Painel Central sobreposto à marca d'água */
+    .block-container {
+        position: relative;
+        z-index: 1; /* Mantém o texto acima da marca d'água */
+        background-color: transparent !important;
+        padding-top: 2rem !important;
+    }
+
+    /* Barra lateral */
+    [data-testid="stSidebar"] {
+        z-index: 2;
+        border-right: 1px solid rgba(128, 128, 128, 0.2);
+    }
+</style>
+<div id="custom-bg-image"></div>
+<style>
+    /* Cards de métricas internos */
+    div[data-testid="metric-container"] {
+        background-color: var(--secondary-background-color);
+        border: 1px solid rgba(128, 128, 128, 0.2);
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    div[data-testid="metric-container"]:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 15px rgba(0,0,0,0.15);
+    }
+    
+    /* Títulos de métricas (labels) */
+    div[data-testid="metric-container"] > div:nth-child(1) > div > p {
+        color: color-mix(in srgb, var(--text-color) 70%, transparent);
+        font-weight: 600;
+        font-size: 1.1rem;
+    }
+    
+    /* Valores das métricas */
+    div[data-testid="metric-container"] > div:nth-child(2) > div > div {
+        color: var(--text-color);
+        font-weight: 800;
+        font-size: 2rem;
+    }
+    
+    /* Estilo de Botões */
+    .stButton > button {
+        border-radius: 8px;
+        font-weight: 600;
+        border: 1px solid rgba(128, 128, 128, 0.3);
+        transition: all 0.3s;
+    }
+    .stButton > button[kind="primary"] {
+        background-color: #3498db;
+        color: white;
+        border: none;
+    }
+    .stButton > button[kind="primary"]:hover {
+        background-color: #2980b9;
+        box-shadow: 0 4px 8px rgba(52, 152, 219, 0.3);
+    }
+    
+    /* Abas do Streamlit */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+        margin-bottom: 20px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: var(--secondary-background-color);
+        border-radius: 8px 8px 0 0;
+        border: 1px solid rgba(128, 128, 128, 0.2);
+        border-bottom: none;
+        padding: 10px 20px;
+        color: color-mix(in srgb, var(--text-color) 70%, transparent);
+        font-weight: 500;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #3498db !important;
+        color: white !important;
+        font-weight: 700;
+    }
+    
+    /* Títulos gerais */
+    h1, h2, h3 {
+        color: var(--text-color);
+        font-weight: 700;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 @st.cache_data(show_spinner=False)
 def load_data_from_kaggle(token):
     url = "https://www.kaggle.com/api/v1/datasets/download/harshadapatil31/covid-19-statistics"
     headers = {"Authorization": f"Bearer {token}"}
+    local_file = "COVID19_Statistics_200_Rows-1.csv"
+    
     try:
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=15)
         if response.status_code == 200:
             with zipfile.ZipFile(BytesIO(response.content)) as z:
                 for filename in z.namelist():
@@ -24,10 +163,14 @@ def load_data_from_kaggle(token):
                         with z.open(filename) as f:
                             return pd.read_csv(f)
         else:
-            st.error(f"Erro de conexão com Kaggle: HTTP {response.status_code}")
+            st.warning(f"Erro ao baixar do Kaggle (HTTP {response.status_code}). Usando base de dados local (Fallback).")
+            if os.path.exists(local_file):
+                return pd.read_csv(local_file)
             return None
     except Exception as e:
-        st.error(f"Falha ao conectar com Kaggle: {e}")
+        st.warning(f"Sem conexão com a internet ou Kaggle fora do ar. Carregando base local segura. (Erro: {e})")
+        if os.path.exists(local_file):
+            return pd.read_csv(local_file)
         return None
 
 # =========================================================
@@ -48,8 +191,12 @@ st.markdown(
 # =========================================================
 st.sidebar.header("🔍 Filtros Globais")
 
-# Token oculto para autenticação no Kaggle
-token_kaggle = "KGAT_992b5f0ae705f1c3822dfbf3c48e1cef"
+# Token oculto para autenticação no Kaggle lido do arquivo de segredos (secrets.toml)
+try:
+    token_kaggle = st.secrets["KAGGLE_TOKEN"]
+except Exception:
+    st.error("Token do Kaggle não encontrado! Crie o arquivo .streamlit/secrets.toml com a chave KAGGLE_TOKEN.")
+    st.stop()
 
 with st.spinner("Baixando e extraindo base de dados mais recente do Kaggle..."):
     df = load_data_from_kaggle(token_kaggle)
@@ -68,6 +215,58 @@ df = df.rename(columns={
     "Tests_Conducted": "Testes Realizados",
     "Vaccination_Rate_%": "Taxa de Vacinação (%)"
 })
+
+# Dicionário de tradução dos países
+dict_paises = {
+    "United States": "Estados Unidos", "Brazil": "Brasil", "India": "Índia", "Russia": "Rússia", 
+    "United Kingdom": "Reino Unido", "France": "França", "Germany": "Alemanha", "Spain": "Espanha", 
+    "Italy": "Itália", "Argentina": "Argentina", "Colombia": "Colômbia", "Mexico": "México", 
+    "Peru": "Peru", "South Africa": "África do Sul", "Iran": "Irã", "Poland": "Polônia", 
+    "Turkey": "Turquia", "Ukraine": "Ucrânia", "Netherlands": "Holanda", "Belgium": "Bélgica", 
+    "Canada": "Canadá", "Chile": "Chile", "Romania": "Romênia", "Czechia": "Chéquia", 
+    "Israel": "Israel", "Portugal": "Portugal", "Sweden": "Suécia", "Switzerland": "Suíça", 
+    "Japan": "Japão", "South Korea": "Coreia do Sul", "China": "China", "Australia": "Austrália", 
+    "New Zealand": "Nova Zelândia", "Egypt": "Egito", "Saudi Arabia": "Arábia Saudita", 
+    "United Arab Emirates": "Emirados Árabes Unidos", "Afghanistan": "Afeganistão", "Albania": "Albânia", 
+    "Algeria": "Argélia", "Andorra": "Andorra", "Angola": "Angola", "Antigua and Barbuda": "Antígua e Barbuda", 
+    "Armenia": "Armênia", "Austria": "Áustria", "Azerbaijan": "Azerbaijão", "Bahamas": "Bahamas", 
+    "Bahrain": "Bahrein", "Bangladesh": "Bangladesh", "Barbados": "Barbados", "Belarus": "Bielorrússia", 
+    "Belize": "Belize", "Benin": "Benim", "Bhutan": "Butão", "Bolivia": "Bolívia", 
+    "Bosnia and Herzegovina": "Bósnia e Herzegovina", "Botswana": "Botsuana", "Brunei": "Brunei", 
+    "Bulgaria": "Bulgária", "Burkina Faso": "Burkina Faso", "Burundi": "Burundi", "Cabo Verde": "Cabo Verde", 
+    "Cambodia": "Camboja", "Cameroon": "Camarões", "Central African Republic": "República Centro-Africana", 
+    "Chad": "Chade", "Comoros": "Comores", "Congo (Brazzaville)": "Congo", 
+    "Congo (Kinshasa)": "República Democrática do Congo", "Costa Rica": "Costa Rica", 
+    "Cote d'Ivoire": "Costa do Marfim", "Croatia": "Croácia", "Cuba": "Cuba", "Cyprus": "Chipre", 
+    "Denmark": "Dinamarca", "Djibouti": "Djibuti", "Dominica": "Dominica", "Dominican Republic": "República Dominicana", 
+    "Ecuador": "Equador", "El Salvador": "El Salvador", "Equatorial Guinea": "Guiné Equatorial", 
+    "Eritrea": "Eritreia", "Estonia": "Estônia", "Eswatini": "Essuatíni", "Ethiopia": "Etiópia", 
+    "Fiji": "Fiji", "Finland": "Finlândia", "Gabon": "Gabão", "Gambia": "Gâmbia", "Georgia": "Geórgia", 
+    "Ghana": "Gana", "Greece": "Grécia", "Grenada": "Granada", "Guatemala": "Guatemala", "Guinea": "Guiné", 
+    "Guinea-Bissau": "Guiné-Bissau", "Guyana": "Guiana", "Haiti": "Haiti", "Honduras": "Honduras", 
+    "Hungary": "Hungria", "Iceland": "Islândia", "Indonesia": "Indonésia", "Iraq": "Iraque", 
+    "Ireland": "Irlanda", "Jamaica": "Jamaica", "Jordan": "Jordânia", "Kazakhstan": "Cazaquistão", 
+    "Kenya": "Quênia", "Kuwait": "Kuwait", "Kyrgyzstan": "Quirguistão", "Laos": "Laos", "Latvia": "Letônia", 
+    "Lebanon": "Líbano", "Lesotho": "Lesoto", "Liberia": "Libéria", "Libya": "Líbia", "Liechtenstein": "Liechtenstein", 
+    "Lithuania": "Lituânia", "Luxembourg": "Luxemburgo", "Madagascar": "Madagascar", "Malawi": "Malawi", 
+    "Malaysia": "Malásia", "Maldives": "Maldivas", "Mali": "Mali", "Malta": "Malta", "Mauritania": "Mauritânia", 
+    "Mauritius": "Maurício", "Moldova": "Moldávia", "Monaco": "Mônaco", "Mongolia": "Mongólia", 
+    "Montenegro": "Montenegro", "Morocco": "Marrocos", "Mozambique": "Moçambique", "Namibia": "Namíbia", 
+    "Nepal": "Nepal", "Nicaragua": "Nicarágua", "Niger": "Níger", "Nigeria": "Nigéria", 
+    "North Macedonia": "Macedônia do Norte", "Norway": "Noruega", "Oman": "Omã", "Pakistan": "Paquistão", 
+    "Panama": "Panamá", "Papua New Guinea": "Papua Nova Guiné", "Paraguay": "Paraguai", "Philippines": "Filipinas", 
+    "Qatar": "Catar", "Rwanda": "Ruanda", "San Marino": "San Marino", "Senegal": "Senegal", "Serbia": "Sérvia", 
+    "Seychelles": "Seicheles", "Sierra Leone": "Serra Leoa", "Singapore": "Singapura", "Slovakia": "Eslováquia", 
+    "Slovenia": "Eslovênia", "Somalia": "Somália", "South Sudan": "Sudão do Sul", "Sri Lanka": "Sri Lanka", 
+    "Sudan": "Sudão", "Syria": "Síria", "Taiwan*": "Taiwan", "Tajikistan": "Tajiquistão", "Tanzania": "Tanzânia", 
+    "Thailand": "Tailândia", "Togo": "Togo", "Trinidad and Tobago": "Trinidad e Tobago", "Tunisia": "Tunísia", 
+    "Uganda": "Uganda", "Uruguay": "Uruguai", "Uzbekistan": "Uzbequistão", "Venezuela": "Venezuela", 
+    "Vietnam": "Vietnã", "Yemen": "Iêmen", "Zambia": "Zâmbia", "Zimbabwe": "Zimbábue"
+}
+
+# Aplicando a tradução aos países. Caso algum não esteja na lista, ele será mantido em inglês original.
+if "País" in df.columns:
+    df["País"] = df["País"].replace(dict_paises)
 
 if "Confirmados" not in df.columns:
     st.error("O arquivo precisa ter uma coluna chamada 'Confirmados'.")
@@ -97,65 +296,8 @@ if df_filtrado.empty:
 st.sidebar.divider()
 st.sidebar.subheader("Exportar Relatório")
 
-@st.cache_data(show_spinner=False)
-def generate_pdf_report(df_to_export, bootstrap_result=None):
-    try:
-        from fpdf import FPDF
-        
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("helvetica", "B", 16)
-        pdf.cell(0, 10, "Relatorio Executivo: Analise Estatistica da COVID-19", new_x="LMARGIN", new_y="NEXT", align="C")
-        pdf.ln(10)
-        
-        pdf.set_font("helvetica", "B", 12)
-        pdf.cell(0, 8, "1. Visao Geral (Filtros Aplicados)", new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font("helvetica", "", 11)
-        
-        total_casos = df_to_export['Confirmados'].sum()
-        total_mortes = df_to_export['Mortes'].sum()
-        vac_media = df_to_export['Taxa de Vacinação (%)'].mean()
-        
-        pdf.cell(0, 6, f"- Total de Registros Analisados: {len(df_to_export)}", new_x="LMARGIN", new_y="NEXT")
-        pdf.cell(0, 6, f"- Total de Casos Confirmados: {total_casos:,.0f}", new_x="LMARGIN", new_y="NEXT")
-        pdf.cell(0, 6, f"- Total de Mortes: {total_mortes:,.0f}", new_x="LMARGIN", new_y="NEXT")
-        pdf.cell(0, 6, f"- Taxa Media de Vacinacao: {vac_media:.1f}%", new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(10)
-        
-        pdf.set_font("helvetica", "B", 12)
-        pdf.cell(0, 8, "2. Inferencia Estatistica (Bootstrap)", new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font("helvetica", "", 11)
-        if bootstrap_result:
-            pdf.cell(0, 6, "Estimativa para Media Populacional de Casos Confirmados.", new_x="LMARGIN", new_y="NEXT")
-            pdf.cell(0, 6, f"- Media Amostral Original: {bootstrap_result['media_original']:,.0f}", new_x="LMARGIN", new_y="NEXT")
-            pdf.cell(0, 6, f"- Media do Bootstrap: {bootstrap_result['media_bootstrap']:,.0f}", new_x="LMARGIN", new_y="NEXT")
-            pdf.cell(0, 6, f"- Intervalo de Confianca (95%): de {bootstrap_result['ic_inferior']:,.0f} ate {bootstrap_result['ic_superior']:,.0f}", new_x="LMARGIN", new_y="NEXT")
-        else:
-            pdf.cell(0, 6, "A analise de Bootstrap nao foi executada na sessao atual.", new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(10)
-        
-        pdf.set_font("helvetica", "B", 12)
-        pdf.cell(0, 8, "3. Top Paises (Maior n. de Casos Confirmados)", new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font("helvetica", "", 10)
-        
-        top_paises = df_to_export.groupby("País")[["Confirmados", "Mortes"]].sum().sort_values(by="Confirmados", ascending=False).head(5)
-        
-        pdf.set_font("helvetica", "B", 10)
-        pdf.cell(70, 8, "Pais", border=1)
-        pdf.cell(60, 8, "Casos Confirmados", border=1, align="R")
-        pdf.cell(60, 8, "Mortes", border=1, align="R", new_x="LMARGIN", new_y="NEXT")
-        
-        pdf.set_font("helvetica", "", 10)
-        for pais, row in top_paises.iterrows():
-            pdf.cell(70, 8, str(pais), border=1)
-            pdf.cell(60, 8, f"{row['Confirmados']:,.0f}", border=1, align="R")
-            pdf.cell(60, 8, f"{row['Mortes']:,.0f}", border=1, align="R", new_x="LMARGIN", new_y="NEXT")
-            
-        return bytes(pdf.output())
-    except Exception as e:
-        import streamlit as st
-        st.error(f"Erro ao gerar PDF: {e}")
-        return None
+# O módulo utils_pdf gera o relatório
+# (A função generate_pdf_report foi importada de utils_pdf)
 
 resultado_boot = st.session_state.get("bootstrap")
 with st.spinner("Preparando PDF Executivo..."):
@@ -172,10 +314,11 @@ if pdf_data:
 # =========================================================
 # Estrutura de Abas
 # =========================================================
-aba_geral, aba_graficos, aba_bootstrap = st.tabs([
+aba_geral, aba_graficos, aba_bootstrap, aba_svm = st.tabs([
     "📊 Visão Geral e Estatística", 
     "📈 Análise Gráfica e Correlações", 
-    "🎲 Inferência Estatística (Bootstrap)"
+    "🎲 Inferência Estatística (Bootstrap)",
+    "🤖 Machine Learning (SVM)"
 ])
 
 # ---------------------------------------------------------
@@ -200,12 +343,25 @@ with aba_geral:
     cols_existentes = [c for c in cols_numericas if c in df_filtrado.columns]
     
     desc_df = df_filtrado[cols_existentes].describe()
+    
+    # Traduzindo os índices gerados pelo describe (que vêm em inglês por padrão)
+    desc_df = desc_df.rename(index={
+        "count": "Contagem",
+        "mean": "Média",
+        "std": "Desvio Padrão",
+        "min": "Mínimo",
+        "25%": "1º Quartil (25%)",
+        "50%": "Mediana (50%)",
+        "75%": "3º Quartil (75%)",
+        "max": "Máximo"
+    })
+    
     st.dataframe(desc_df, use_container_width=True)
     
     csv_desc = desc_df.to_csv().encode('utf-8')
     st.download_button("📥 Baixar Estatísticas (CSV)", data=csv_desc, file_name="estatisticas_descritivas.csv", mime="text/csv")
     
-    with st.expander("Visualizar Amostra dos Dados Filtrados"):
+    with st.expander("Visualizar Amostra dos Dados Filtrados", expanded=True):
         st.dataframe(df_filtrado.head(50), use_container_width=True)
 
 
@@ -219,18 +375,23 @@ with aba_graficos:
     # Agrupar por data
     evolucao = df_filtrado.groupby("Data")[["Confirmados", "Mortes", "Recuperados"]].sum().reset_index()
     
-    fig_evolucao, ax_evolucao = plt.subplots(figsize=(10, 5))
-    ax_evolucao.plot(evolucao["Data"], evolucao["Confirmados"], label="Confirmados", color="#3498db")
-    ax_evolucao.plot(evolucao["Data"], evolucao["Recuperados"], label="Recuperados", color="#2ecc71")
-    ax_evolucao.plot(evolucao["Data"], evolucao["Mortes"], label="Mortes", color="#e74c3c")
-    ax_evolucao.set_title("Evolução de Casos ao Longo do Tempo")
-    ax_evolucao.set_xlabel("Data")
-    ax_evolucao.set_ylabel("Quantidade (Soma)")
-    ax_evolucao.legend()
-    ax_evolucao.grid(axis='y', alpha=0.3)
-    fig_evolucao.tight_layout()
-    st.pyplot(fig_evolucao)
-    plt.close(fig_evolucao)
+    fig_evolucao = px.line(
+        evolucao, 
+        x="Data", 
+        y=["Confirmados", "Recuperados", "Mortes"],
+        labels={"value": "Quantidade (Soma)", "variable": "Métrica", "Data": "Data"},
+        color_discrete_map={"Confirmados": "#3498db", "Recuperados": "#2ecc71", "Mortes": "#e74c3c"}
+    )
+    fig_evolucao.update_layout(
+        title="Evolução de Casos ao Longo do Tempo",
+        hovermode="x unified",
+        plot_bgcolor="white",
+        legend_title_text="",
+        margin=dict(l=0, r=0, t=40, b=0)
+    )
+    fig_evolucao.update_xaxes(showgrid=True, gridwidth=1, gridcolor="#f0f2f6")
+    fig_evolucao.update_yaxes(showgrid=True, gridwidth=1, gridcolor="#f0f2f6")
+    st.plotly_chart(fig_evolucao, use_container_width=True)
     
     csv_evolucao = evolucao.to_csv(index=False).encode('utf-8')
     st.download_button("📥 Baixar Dados da Evolução (CSV)", data=csv_evolucao, file_name="evolucao_temporal.csv", mime="text/csv")
@@ -254,22 +415,25 @@ with aba_graficos:
         
     with col_graf2:
         st.subheader("Dispersão: Vacinação vs Mortes")
-        fig_scatter, ax_scatter = plt.subplots(figsize=(6, 5))
-        sns.scatterplot(
-            data=df_filtrado, 
+        fig_scatter = px.scatter(
+            df_filtrado, 
             x="Taxa de Vacinação (%)", 
             y="Mortes", 
-            hue="País", 
-            alpha=0.7, 
-            ax=ax_scatter
+            color="País",
+            size="Confirmados",
+            hover_name="País",
+            hover_data={"Data": True, "Confirmados": True, "País": False},
+            opacity=0.7
         )
-        ax_scatter.set_title("Relação entre Taxa de Vacinação e Mortes")
-        ax_scatter.grid(True, alpha=0.3)
-        # Tenta não sobrepor muitas legendas
-        ax_scatter.legend(loc="upper right", bbox_to_anchor=(1.25, 1))
-        fig_scatter.tight_layout()
-        st.pyplot(fig_scatter)
-        plt.close(fig_scatter)
+        fig_scatter.update_layout(
+            title="Relação entre Taxa de Vacinação e Mortes",
+            plot_bgcolor="white",
+            margin=dict(l=0, r=0, t=40, b=0),
+            legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5)
+        )
+        fig_scatter.update_xaxes(showgrid=True, gridwidth=1, gridcolor="#f0f2f6")
+        fig_scatter.update_yaxes(showgrid=True, gridwidth=1, gridcolor="#f0f2f6")
+        st.plotly_chart(fig_scatter, use_container_width=True)
 
 
 # ---------------------------------------------------------
@@ -298,27 +462,9 @@ with aba_bootstrap:
     
     if st.button("▶️ Executar Bootstrap para Casos Confirmados", type="primary"):
         with st.spinner("Realizando reamostragem computacional..."):
-            rng = np.random.default_rng(int(semente))
-            casos_confirmados = df_filtrado["Confirmados"].values
-            n = len(casos_confirmados)
-
-            # Reamostragem vetorizada
-            amostras = rng.choice(casos_confirmados, size=(int(n_iteracoes), n), replace=True)
-            medias_boot = amostras.mean(axis=1)
-
-            media_original = np.mean(casos_confirmados)
-            media_bootstrap = np.mean(medias_boot)
-            ic_inferior = np.percentile(medias_boot, 2.5)
-            ic_superior = np.percentile(medias_boot, 97.5)
-
-            st.session_state["bootstrap"] = {
-                "n_iteracoes": int(n_iteracoes),
-                "media_original": media_original,
-                "media_bootstrap": media_bootstrap,
-                "ic_inferior": ic_inferior,
-                "ic_superior": ic_superior,
-                "medias_boot": medias_boot,
-            }
+            # A lógica estatística pesada foi migrada para utils_estatistica.py
+            resultado = executar_bootstrap_confirmados(df_filtrado, n_iteracoes, semente)
+            st.session_state["bootstrap"] = resultado
 
     resultado = st.session_state.get("bootstrap")
     
@@ -370,3 +516,144 @@ with aba_bootstrap:
             file_name="dados_bootstrap.csv",
             mime="text/csv",
         )
+
+# ---------------------------------------------------------
+# Aba 4: Machine Learning (SVM)
+# ---------------------------------------------------------
+with aba_svm:
+    st.header("🤖 Support Vector Machine (SVM)")
+    st.markdown(
+        """
+        Nesta seção, aplicamos o algoritmo **Support Vector Regression (SVR)** para modelar 
+        e prever o número de **Mortes** com base em uma ou múltiplas variáveis preditoras (Regressão Múltipla).
+        """
+    )
+    
+    try:
+        from sklearn.svm import SVR
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.model_selection import train_test_split
+        from sklearn.metrics import mean_squared_error, r2_score
+        
+        # Preparar dados
+        df_svm = df_filtrado.dropna(subset=['Confirmados', 'Mortes']).copy()
+        
+        if len(df_svm) < 10:
+            st.warning("Dados insuficientes para treinar o modelo SVM. Por favor, amplie os filtros na barra lateral para incluir mais dados.")
+        else:
+            # Seleção Dinâmica de Features
+            st.subheader("1. Seleção de Variáveis (Features)")
+            opcoes_features = ["Confirmados", "Taxa de Vacinação (%)", "Testes Realizados", "Ativos", "Recuperados"]
+            opcoes_validas = [col for col in opcoes_features if col in df_svm.columns]
+            
+            features_selecionadas = st.multiselect(
+                "Escolha as variáveis para o modelo prever as Mortes (Regressão Múltipla):",
+                opcoes_validas,
+                default=["Confirmados"]
+            )
+            
+            if not features_selecionadas:
+                st.warning("Por favor, selecione pelo menos uma variável.")
+                st.stop()
+                
+            # Limpar NaNs baseado nas colunas escolhidas
+            df_ml = df_svm.dropna(subset=features_selecionadas + ['Mortes']).copy()
+            if len(df_ml) < 10:
+                st.warning("Filtro muito restritivo. Dados insuficientes para essas colunas específicas.")
+                st.stop()
+
+            # Features (X) e Target (y)
+            X = df_ml[features_selecionadas].values
+            y = df_ml['Mortes'].values
+            
+            # Padronização (Scaling) - crucial para SVM
+            scaler_X = StandardScaler()
+            scaler_y = StandardScaler()
+            
+            X_scaled = scaler_X.fit_transform(X)
+            y_scaled = scaler_y.fit_transform(y.reshape(-1, 1)).ravel()
+            
+            # Separar em treino e teste (70% treino, 30% teste)
+            X_train, X_test, y_train, y_test = train_test_split(X_scaled, y_scaled, test_size=0.3, random_state=42)
+            
+            # Controles do Modelo SVM
+            st.subheader("2. Parâmetros do Modelo")
+            C_param = st.slider("Parâmetro de Regularização (C)", min_value=0.1, max_value=100.0, value=1.0, step=0.1)
+            
+            if st.button("▶️ Treinar e Comparar Modelos SVR", type="primary"):
+                with st.spinner("Treinando modelos SVM (Linear, Polinomial e RBF)..."):
+                    
+                    fig_svm, ax_svm = plt.subplots(figsize=(10, 6))
+                    is_1d = (len(features_selecionadas) == 1)
+                    
+                    if is_1d:
+                        # Se tiver apenas 1 feature, plotamos os pontos e a linha de regressão
+                        ax_svm.scatter(X, y, color="#7f8c8d", label="Dados Reais", alpha=0.4, s=35)
+                        X_grid = np.linspace(X.min(), X.max(), 100).reshape(-1, 1)
+                        X_grid_scaled = scaler_X.transform(X_grid)
+                    else:
+                        # Para Regressão Múltipla, plotamos Real x Previsto da base de Teste
+                        y_test_orig_all = scaler_y.inverse_transform(y_test.reshape(-1, 1)).ravel()
+                        ax_svm.plot([y_test_orig_all.min(), y_test_orig_all.max()], 
+                                    [y_test_orig_all.min(), y_test_orig_all.max()], 
+                                    'k--', lw=2, label="Previsão Exata (Ideal)")
+                    
+                    cores_kernel = {"linear": "#3498db", "poly": "#2ecc71", "rbf": "#e74c3c"}
+                    resultados_metricas = []
+                    
+                    for kernel_tipo, cor in cores_kernel.items():
+                        model = SVR(kernel=kernel_tipo, C=C_param)
+                        model.fit(X_train, y_train)
+                        
+                        y_pred_scaled = model.predict(X_test)
+                        y_pred = scaler_y.inverse_transform(y_pred_scaled.reshape(-1, 1)).ravel()
+                        y_test_orig = scaler_y.inverse_transform(y_test.reshape(-1, 1)).ravel()
+                        
+                        mse = mean_squared_error(y_test_orig, y_pred)
+                        r2 = r2_score(y_test_orig, y_pred)
+                        resultados_metricas.append({"Kernel": kernel_tipo.capitalize(), "MSE": mse, "R² Score": r2})
+                        
+                        if is_1d:
+                            y_grid_scaled = model.predict(X_grid_scaled)
+                            y_grid = scaler_y.inverse_transform(y_grid_scaled.reshape(-1, 1)).ravel()
+                            ax_svm.plot(X_grid, y_grid, color=cor, linewidth=3, label=f"SVR ({kernel_tipo.capitalize()})")
+                        else:
+                            ax_svm.scatter(y_test_orig, y_pred, color=cor, alpha=0.6, s=30, label=f"SVR ({kernel_tipo.capitalize()})")
+                    
+                    st.success("Modelos treinados com sucesso!")
+                    
+                    st.write("**Comparativo de Desempenho:**")
+                    df_metricas = pd.DataFrame(resultados_metricas)
+                    st.dataframe(df_metricas.style.format({"MSE": "{:,.0f}", "R² Score": "{:.4f}"}), use_container_width=True)
+                    
+                    st.divider()
+                    st.subheader("3. Visualização do Ajuste")
+                    
+                    if is_1d:
+                        ax_svm.set_xlabel(features_selecionadas[0])
+                        ax_svm.set_ylabel("Mortes")
+                        ax_svm.set_title(f"Comparação SVR: Previsão de Mortes baseado em {features_selecionadas[0]}")
+                    else:
+                        ax_svm.set_xlabel("Mortes Reais (Conjunto de Teste)")
+                        ax_svm.set_ylabel("Mortes Previstas pelo Modelo")
+                        ax_svm.set_title("Regressão Múltipla: Valores Reais vs Previstos")
+                        
+                    ax_svm.legend()
+                    ax_svm.grid(True, alpha=0.3)
+                    
+                    fig_svm.tight_layout()
+                    st.pyplot(fig_svm)
+                    
+                    # Botão para baixar gráfico
+                    buf_svm = BytesIO()
+                    fig_svm.savefig(buf_svm, format="png", dpi=150)
+                    plt.close(fig_svm)
+                    
+                    st.download_button(
+                        "🖼️ Baixar Gráfico Comparativo (PNG)",
+                        data=buf_svm.getvalue(),
+                        file_name="svm_comparativo.png",
+                        mime="image/png",
+                    )
+    except ImportError:
+        st.error("A biblioteca 'scikit-learn' não está instalada. Adicione 'scikit-learn' ao seu ambiente/requirements.txt e reinicie o app.")
