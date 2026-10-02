@@ -6,3 +6,5 @@ matplotlib
 requests
 xhtml2pdf
 fpdf2
+scikit-learn
+plotly
